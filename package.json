@@ -1,12 +1,54 @@
-{
-  "name": "phonepe-payment",
-  "version": "1.0.0",
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
-  },
-  "dependencies": {
-    "express": "^4.18.2",
-    "node-fetch": "^2.6.1"
+ app.post("/api/create-payment", async (req, res) => {
+  try {
+    const { amountINR, customerName, phone, email, redirectUrl, product } = req.body;
+
+    const amountPaise = parseInt(amountINR) * 100;
+
+    const payload = {
+      merchantId: PHONEPE_MERCHANT_ID,
+      merchantTransactionId: "txn_" + Date.now(),
+      merchantUserId: "user_" + Date.now(),
+      amount: amountPaise,
+      redirectUrl,
+      redirectMode: "POST",
+      callbackUrl: redirectUrl,
+      mobileNumber: phone,
+      paymentInstrument: { type: "PAY_PAGE" },
+    };
+
+    const payloadStr = JSON.stringify(payload);
+    const base64Payload = Buffer.from(payloadStr).toString("base64");
+
+    const checksum =
+      crypto
+        .createHash("sha256")
+        .update(base64Payload + "/pg/v1/pay" + PHONEPE_SALT_KEY)
+        .digest("hex") +
+      "###" +
+      PHONEPE_SALT_INDEX;
+
+    const options = {
+      method: "POST",
+      url: `${PHONEPE_HOST}/pg/v1/pay`,
+      headers: {
+        "Content-Type": "application/json",
+        "X-VERIFY": checksum,
+        "X-MERCHANT-ID": PHONEPE_MERCHANT_ID,
+      },
+      data: { request: base64Payload },
+    };
+
+    const response = await axios(options);
+
+    if (response.data.success && response.data.data && response.data.data.instrumentResponse) {
+      // ✅ Redirect browser directly to PhonePe payment page
+      return res.redirect(response.data.data.instrumentResponse.redirectInfo.url);
+    } else {
+      return res.status(400).json({ error: "Payment init failed", details: response.data });
+    }
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "PhonePe init failed", details: err.message });
   }
-}
+});
+
